@@ -1,10 +1,13 @@
 package hr.reversi.controller;
 
 import hr.reversi.Main;
+import hr.reversi.concurrency.PlayerMove;
+import hr.reversi.concurrency.PlayerMoveWriter;
 import hr.reversi.model.*;
 import hr.reversi.rmi.server.ChatService;
 import hr.reversi.service.AlertService;
 import hr.reversi.service.DocumentationService;
+import hr.reversi.service.XmlService;
 import hr.reversi.ui.DiscUI;
 import hr.reversi.util.AlertType;
 import hr.reversi.util.DiscState;
@@ -20,7 +23,6 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
-
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -34,6 +36,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.ResourceBundle;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class BoardController implements Initializable {
     @FXML
@@ -55,6 +60,7 @@ public class BoardController implements Initializable {
     @FXML
     private TextField message;
 
+    public static final int NUMBER_OF_THREADS = 2;
     private DiscUI discUi;
     private static Socket clientSocket;
     private static BoardState boardState;
@@ -62,10 +68,12 @@ public class BoardController implements Initializable {
     private static Player playerWhite;
     private static Player playerBlack;
     private static  DiscState playerTurn;
+    private static PlayerMove playerMove;
     private final Boolean discMarker = true;
     private final Boolean moveMarker = true;
     private final String fileName = "reversi.ser";
     private ChatService stub = null;
+    private ExecutorService service;
 
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
@@ -79,8 +87,32 @@ public class BoardController implements Initializable {
         discUi = new DiscUI();
         boardState = new BoardState();
 
+        startConcurrency();
         startChat();
         startServer();
+    }
+    private void startConcurrency(){
+        playerMove = new PlayerMove();
+        service = Executors.newCachedThreadPool();
+    }
+
+    private void setNewMove(Integer[] move){
+
+        service.execute(new PlayerMoveWriter(playerMove, move));
+
+        try {
+            service.awaitTermination(1000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ex) {
+           ex.printStackTrace();
+        }
+
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException ex) {
+            ex.printStackTrace();
+        }
+
+        playerMove.printAllPlayedMoves();
     }
 
     private void startChat(){
@@ -108,7 +140,7 @@ public class BoardController implements Initializable {
                 }
 
                 messages.setText(chatHistoryBuilder.toString());
-                System.out.println("Check for messages at: " + LocalDateTime.now());
+                //System.out.println("Check for messages at: " + LocalDateTime.now());
                 Thread.sleep(2000);
             } catch (RemoteException | InterruptedException e) {
                 e.printStackTrace();
@@ -350,6 +382,11 @@ public class BoardController implements Initializable {
             if (clientSocket.isConnected()){
                 sendDataToClient(clientSocket);
             }
+
+            Integer[] move = new Integer[2];
+            move[0] = row;
+            move[1] = col;
+            setNewMove(move);
         }
     }
 
@@ -606,6 +643,7 @@ public class BoardController implements Initializable {
             }
 
             messages.setText(chatHistoryBuilder.toString());
+            message.setText("");
         } catch (RemoteException e) {
             throw new RuntimeException(e);
         }
@@ -621,13 +659,11 @@ public class BoardController implements Initializable {
     private void onSaveGameButtonClick() throws IOException {
         saveGame();
     }
-
     @FXML
     /** Load game button click handler. */
     private void onLoadGameButtonClick() throws IOException, ClassNotFoundException {
         loadGame();
     }
-
     @FXML
     /** High score button click handler. */
     private void onHighScoreButtonClick() {
@@ -637,6 +673,17 @@ public class BoardController implements Initializable {
     /** Documentation button click handler. */
     private void onDocumentationButtonClick() {
         DocumentationService.generateDocumentation();
+    }
+    @FXML
+    /** Write XML with played moves */
+    private void onXmlWriteButtonClick(){
+        BoardState boardState = getBoardState();
+        XmlService.writeXml(boardState);
+    }
+    @FXML
+    /** Read XML for played moves */
+    private void onXmlReadButtonClick(){
+        XmlService.readXml();
     }
 
     //*********************************************
